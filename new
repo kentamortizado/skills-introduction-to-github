@@ -3,7 +3,9 @@
 //|  EMA crossover + ADX trend filter + ATR-based stops             |
 //|  Fixed-percent risk sizing, daily loss limit, trailing stop      |
 //|                                                                  |
-//|  DEFAULTS TUNED FOR: EURUSD, H1 timeframe                        |
+//|  DEFAULTS TUNED FOR: XAUUSD (Gold), M15 timeframe                 |
+//|  Small accounts: gold's 0.01 lot may exceed your risk budget.    |
+//|  InpMaxRiskPctMinLot is the hard ceiling in that case.           |
 //|  ALWAYS BACKTEST AND DEMO-TRADE BEFORE GOING LIVE.               |
 //+------------------------------------------------------------------+
 #property copyright "Built for personal use"
@@ -20,7 +22,7 @@ input group "=== Strategy ==="
 input int      InpFastEMA        = 20;     // Fast EMA period
 input int      InpSlowEMA        = 50;     // Slow EMA period
 input int      InpADXPeriod      = 14;     // ADX period
-input double   InpADXMin         = 25.0;   // Minimum ADX to allow a trade (trend strength)
+input double   InpADXMin         = 20.0;   // Minimum ADX to allow a trade (trend strength)
 input int      InpATRPeriod      = 14;     // ATR period
 input double   InpSL_ATR         = 2.0;    // Stop loss  = ATR x this
 input double   InpTP_ATR         = 3.0;    // Take profit = ATR x this
@@ -29,9 +31,10 @@ input double   InpTrail_ATR      = 1.5;    // Trailing distance = ATR x this
 
 //--- Risk inputs
 input group "=== Risk Management ==="
-input double   InpRiskPercent    = 1.0;    // Risk per trade (% of balance)
+input double   InpRiskPercent    = 1.0;    // Target risk per trade (% of balance)
+input double   InpMaxRiskPctMinLot = 5.0;  // HARD ceiling if min lot exceeds target risk (%)
 input double   InpMaxDailyLossPct= 3.0;    // Stop trading for the day after this % loss
-input int      InpMaxSpreadPts   = 30;     // Max allowed spread (points)
+input int      InpMaxSpreadPts   = 50;     // Max allowed spread (points) - gold is typically 20-50
 input int      InpMaxPositions   = 1;      // Max open positions for this EA
 input double   InpMaxLot         = 1.0;    // Hard cap on lot size
 
@@ -39,7 +42,7 @@ input double   InpMaxLot         = 1.0;    // Hard cap on lot size
 input group "=== Filters ==="
 input bool     InpUseTimeFilter  = true;   // Only trade during set hours (server time)
 input int      InpStartHour      = 7;      // Start hour (server time)
-input int      InpEndHour        = 20;     // End hour (server time)
+input int      InpEndHour        = 21;     // End hour (server time)
 input bool     InpSkipFriday     = true;   // No new trades on Friday after 14:00
 
 //--- Identification
@@ -334,15 +337,20 @@ double CalculateLot(double slDistancePrice)
 
    if(lot < minLot)
    {
-      // Even the minimum lot exceeds our risk budget. Warn and skip.
-      double minLotRisk = lossPerLot * minLot;
-      if(minLotRisk > riskMoney * 1.5)
+      // The minimum lot exceeds the target risk. Allow it only up to the hard ceiling.
+      double minLotRisk    = lossPerLot * minLot;
+      double minLotRiskPct = minLotRisk / balance * 100.0;
+      if(minLotRiskPct > InpMaxRiskPctMinLot)
       {
-         Print("Skipping trade: min lot ", minLot, " would risk ",
-               DoubleToString(minLotRisk, 2), " (budget ", DoubleToString(riskMoney, 2), ")");
+         Print("Skipping trade: min lot ", DoubleToString(minLot, 2), " would risk ",
+               DoubleToString(minLotRisk, 2), " = ", DoubleToString(minLotRiskPct, 1),
+               "% of balance (ceiling ", DoubleToString(InpMaxRiskPctMinLot, 1),
+               "%). Use a lower timeframe, cent account, or bigger balance.");
          return 0;
       }
-      lot = minLot; // tolerate up to 1.5x budget on tiny accounts
+      Print("WARNING: using min lot ", DoubleToString(minLot, 2), " - actual risk ",
+            DoubleToString(minLotRiskPct, 1), "% (target ", DoubleToString(InpRiskPercent, 1), "%)");
+      lot = minLot;
    }
 
    // Margin check
